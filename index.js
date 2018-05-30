@@ -32,7 +32,8 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
         }
 
         Exporter.config('custom', config.custom || {
-            'kudosEnabled': false
+            'importKudos': false,
+            'importBookmarks': true
         });
 
         Exporter.connection = mysql.createConnection(_config);
@@ -40,6 +41,14 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
         callback(null, Exporter.config());
     };
+
+    Exporter.query = function (query, callback) {
+		Exporter.log('=====QUERY=====\n', query);
+        Exporter.connection.query(query, function (err, rows) {
+			rows && Exporter.log('=====ROWS=====\n', rows.length);
+		    callback(err, rows);
+        });
+	};
 
     Exporter.getUsers = function(callback) {
         return Exporter.getPaginatedUsers(0, -1, callback);
@@ -76,15 +85,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             // + 'WHERE ' + prefix + 'USERS.USER_ID = ' + prefix + 'USER_PROFILE.USER_ID '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // console.log ('Users query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -122,7 +129,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
         // return empty string if e.g. GDN_User.Photo is NULL
         if (!path)
             return "";
-        // probably won't work on windows
         var lastSlash = path.lastIndexOf('/') + 1;
         return path.substring(0, lastSlash) + 'n' + path.substring(lastSlash);
     };
@@ -145,16 +151,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             + 'WHERE tblCategory.CategoryID > -1 ' // GDN has a root category with id -1 we don't use
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-
-        // console.log ('Categories query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -196,15 +199,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // console.log ('Topics query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -255,15 +256,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // console.log ('Messages query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -274,7 +273,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
                 var map = {};
 
                 rows.forEach(function(row) {
-                    row._title = row._title ? row._title[0].toUpperCase() + row._title.substr(1) : 'Untitled';
                     row._timestamp = ((row._timestamp || 0) * 1000) || startms;
                     map[row._mid] = row;
                 });
@@ -291,9 +289,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
         var err;
         var prefix = Exporter.config('prefix');
-
-        var custom = Exporter.config('custom');
-        var importAttachments = custom && custom.importAttachments;
 
         var startms = +new Date();
         var query =
@@ -322,10 +317,9 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             //  + 'tblTopics.TOPIC_STATUS AS _status, '  // don't need this
 
              + 'tblTopics.Announce AS _pinned, ';
-             if (importAttachments) {
-                query += '(SELECT GROUP_CONCAT(CONCAT("/uploads/files", media.Path)) from GDN_Media AS media WHERE media.ForeignID = tblTopics.DiscussionID AND media.Type LIKE "image%" AND media.ForeignTable = "discussion") AS _images, '
-                 + '(SELECT GROUP_CONCAT(CONCAT("/uploads/files", media.Path)) from GDN_Media AS media WHERE media.ForeignID = tblTopics.DiscussionID AND media.Type NOT LIKE "image%" AND media.ForeignTable = "discussion") AS _attachments, '
-             }
+
+        query += '(SELECT GROUP_CONCAT(CONCAT("/uploads/_imported_images_/", media.Path)) from GDN_Media AS media WHERE media.ForeignID = tblTopics.DiscussionID AND media.Type LIKE "image%" AND media.ForeignTable = "discussion") AS _images, '
+                 + '(SELECT GROUP_CONCAT(CONCAT("/uploads/_imported_files_/", media.Path)) from GDN_Media AS media WHERE media.ForeignID = tblTopics.DiscussionID AND media.Type NOT LIKE "image%" AND media.ForeignTable = "discussion") AS _attachments, '
 
             // I dont need it, but if it should be 0 per UBB logic, since this post is not replying to anything, it's the parent-post of the topic
             //  + 'tblPosts.POST_PARENT_ID AS _post_replying_to, '
@@ -333,7 +327,7 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             // this should be == to the _tid on top of this query
             //  + 'tblPosts.DiscussionID AS _post_tid, '
 
-            query += 'tblTopics.Body AS _content '
+        query += 'tblTopics.Body AS _content '
 
             + 'FROM ' + prefix + 'Discussion AS tblTopics '
             // see
@@ -342,15 +336,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             // + 'AND '  + 'tblPosts.POST_PARENT_ID=0 '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // Exporter.log ('Topics query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -381,9 +373,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
         var err;
         var prefix = Exporter.config('prefix');
 
-        var custom = Exporter.config('custom');
-        var importAttachments = custom && custom.importAttachments;
-
         var startms = +new Date();
         var query =
             'SELECT '
@@ -392,19 +381,19 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             + 'tblPosts.DiscussionID AS _tid, '
             + 'UNIX_TIMESTAMP(tblPosts.DateInserted) AS _timestamp, '
             + 'UNIX_TIMESTAMP(tblPosts.DateUpdated) AS _edited, '
+
             // + 'tblPosts.
             // not being used
             // + 'tblPosts.POST_SUBJECT AS _subject, '
 
             + 'tblPosts.Body AS _content, '
             + 'tblPosts.InsertUserID AS _uid, ';
-            if (importAttachments) {
-                query += '(SELECT GROUP_CONCAT(CONCAT("/uploads/files", media.Path)) from ' + prefix + 'Media AS media WHERE media.ForeignID = tblPosts.CommentID AND media.Type LIKE "image%" AND media.ForeignTable = "comment") AS _images, '
-                + '(SELECT GROUP_CONCAT(CONCAT("/uploads/files", media.Path)) from ' + prefix + 'Media AS media WHERE media.ForeignID = tblPosts.CommentID AND media.Type NOT LIKE "image%" AND media.ForeignTable = "comment") AS _attachments, '
-            }
 
-            // I couldn't tell what's the different, they're all HTML to me
-            query += 'tblPosts.Format AS _markup ' // TODO have to convert this one to markup?, val is "html"
+        query += '(SELECT GROUP_CONCAT(CONCAT("/uploads/_imported_images_/", media.Path)) from ' + prefix + 'Media AS media WHERE media.ForeignID = tblPosts.CommentID AND media.Type LIKE "image%" AND media.ForeignTable = "comment") AS _images, '
+            + '(SELECT GROUP_CONCAT(CONCAT("/uploads/_imported_files_/", media.Path)) from ' + prefix + 'Media AS media WHERE media.ForeignID = tblPosts.CommentID AND media.Type NOT LIKE "image%" AND media.ForeignTable = "comment") AS _attachments, '
+
+        // I couldn't tell what's the different, they're all HTML to me
+        query += 'tblPosts.Format AS _markup ' // TODO have to convert this one to markup?, val is "html"
 
             // maybe use this one to skip
             // + 'tblPosts.POST_IS_APPROVED AS _approved '
@@ -415,16 +404,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             // + 'WHERE POST_PARENT_ID > 0 '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // Exporter.log ('Posts query is: ' + query);
-
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -448,6 +434,7 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
     Exporter.getVotes = function(callback) {
         return Exporter.getPaginatedVotes(0, -1, callback);
     };
+
     Exporter.getPaginatedVotes = function(start, limit, callback) {
         callback = !_.isFunction(callback) ? noop : callback;
 
@@ -462,7 +449,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
         var err;
         var prefix = Exporter.config('prefix');
-        var startms = +new Date();
         var query =
             'SELECT '
             + 'CONCAT(IFNULL(tblVotes.CommentID, "N"), "_", IFNULL(tblVotes.DiscussionID, "N"), "_", tblVotes.UserID) AS _vid, ' // no unique id, so had to make a composite key
@@ -473,15 +459,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             + 'FROM ' + prefix + 'Kudos AS tblVotes '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // console.log('Votes query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -515,7 +499,6 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
 
         var err;
         var prefix = Exporter.config('prefix');
-        var startms = +new Date();
         var query =
             'SELECT '
             + 'CONCAT(tblBookmarks.UserID, "_", tblBookmarks.DiscussionID) AS _bid, ' // no unique id, so had to make a composite key
@@ -525,15 +508,13 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             + 'FROM ' + prefix + 'UserDiscussion AS tblBookmarks '
             + (start >= 0 && limit >= 0 ? 'LIMIT ' + start + ',' + limit : '');
 
-        // console.log('Bookmarks query is: ' + query);
-
         if (!Exporter.connection) {
             err = {error: 'MySQL connection is not setup. Run setup(config) first'};
             Exporter.error(err.error);
             return callback(err);
         }
 
-        Exporter.connection.query(query,
+        Exporter.query(query,
             function(err, rows) {
                 if (err) {
                     Exporter.error(err);
@@ -563,9 +544,9 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             function(next) {
                 Exporter.setup(config, next);
             },
-            function(next) {
-                Exporter.getUsers(next);
-            },
+            // function(next) {
+            //     Exporter.getUsers(next);
+            // },
             function(next) {
                 Exporter.getCategories(next);
             },
@@ -575,6 +556,18 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             function(next) {
                 Exporter.getPosts(next);
             },
+			function(next) {
+				Exporter.getRooms(next);
+			},
+			function(next) {
+				Exporter.getMessages(next);
+			},
+			function(next) {
+				Exporter.getVotes(next);
+			},
+			function(next) {
+				Exporter.getBookmarks(next);
+			},
             function(next) {
                 Exporter.teardown(next);
             }
@@ -598,6 +591,18 @@ var logPrefix = '[nodebb-plugin-import-vanilla]';
             function(next) {
                 Exporter.getPaginatedPosts(1001, 2000, next);
             },
+			function(next) {
+				Exporter.getPaginatedRooms(0, 1000, next);
+			},
+			function(next) {
+				Exporter.getPaginatedMessages(0, 1000, next);
+			},
+			function(next) {
+				Exporter.getPaginatedVotes(0, 1000, next);
+			},
+			function(next) {
+				Exporter.getPaginatedBookmarks(0, 1000, next);
+			},
             function(next) {
                 Exporter.teardown(next);
             }
